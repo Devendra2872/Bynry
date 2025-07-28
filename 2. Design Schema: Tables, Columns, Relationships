@@ -1,0 +1,146 @@
+1  Design Schema:-
+
+1. companies
+   Stores companies using the system.
+   
+   CREATE TABLE companies (
+       id SERIAL PRIMARY KEY,
+       name TEXT NOT NULL
+   );
+
+ 
+2. warehouses
+   Each company can have multiple warehouses.
+  
+   CREATE TABLE warehouses (
+    id SERIAL PRIMARY KEY,
+    company_id INT NOT NULL REFERENCES companies(id),
+    name TEXT NOT NULL
+   );
+
+ 3. products
+    Stores individual products. SKU must be unique across the platform.  
+
+    CREATE TABLE products (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    sku TEXT UNIQUE NOT NULL,
+    price NUMERIC(10, 2) NOT NULL,
+    low_stock_threshold INT DEFAULT 10  -- default threshold
+    );
+
+ 4. inventories
+    Stores product quantities per warehouse (many-to-many between products and warehouses).  
+    
+    CREATE TABLE inventories (
+    product_id INT NOT NULL REFERENCES products(id),
+    warehouse_id INT NOT NULL REFERENCES warehouses(id),
+    quantity INT NOT NULL DEFAULT 0,
+    PRIMARY KEY (product_id, warehouse_id)
+    );
+
+5. inventory_changes
+   Tracks changes to inventory for audit/history purposes. 
+
+   CREATE TABLE inventory_changes (
+    id SERIAL PRIMARY KEY,
+    product_id INT NOT NULL REFERENCES products(id),
+    warehouse_id INT NOT NULL REFERENCES warehouses(id),
+    change INT NOT NULL, -- positive or negative
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+   );
+
+6. suppliers
+   Stores supplier info.   
+
+   CREATE TABLE suppliers (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    contact_email TEXT
+   );
+
+7. product_suppliers
+   Many-to-many between products and suppliers.   
+
+   CREATE TABLE product_suppliers (
+    product_id INT NOT NULL REFERENCES products(id),
+    supplier_id INT NOT NULL REFERENCES suppliers(id),
+    PRIMARY KEY (product_id, supplier_id)
+   );
+   
+8. product_bundles
+   Handles "bundled" products (product containing other products).
+
+   CREATE TABLE product_bundles (
+    bundle_id INT NOT NULL REFERENCES products(id),
+    item_id INT NOT NULL REFERENCES products(id),
+    quantity INT NOT NULL,
+    PRIMARY KEY (bundle_id, item_id)
+   );
+
+9. sales
+   Helps determine “recent sales activity” for alerts.   
+   CREATE TABLE sales (
+    id SERIAL PRIMARY KEY,
+    product_id INT NOT NULL REFERENCES products(id),
+    warehouse_id INT NOT NULL REFERENCES warehouses(id),
+    quantity INT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+2, Identify Gaps: Questions to Ask Product Team :-
+
+1. Can a product belong to multiple companies or is it global?
+
+2. Can a supplier supply to multiple companies, or is it a per-company contract?
+
+3. Should low stock thresholds be configurable per warehouse instead of per product?
+
+4. How are bundle prices determined — fixed or derived from components?
+
+5. Do we need to track expiration dates, batch numbers, or serial numbers for inventory?
+
+6. Are inventory changes manual, automatic (on sale), or both?
+
+7. What defines 'recent sales activity' — last 7 days, 30 days?
+
+8. Do we need to support product variants (e.g., sizes, colors)?
+
+9. Should we track product reorder frequency or lead time per supplier?
+
+10. Is multi-currency support needed for pricing?
+
+
+3. Explain Decisions: 
+ 1. Surrogate Primary Keys (id).
+ Explanation:-
+ Simpler to manage and scale across systems
+
+ 2. Unique Constraint on sku.
+ Explanation:-
+ Enforces business rule that SKU is globally unique
+
+ 3. Composite Key on inventories
+ Ex:-
+ Ensures one inventory record per product-warehouse pair.
+
+ 4.inventory_changes table
+ Ex:- 
+ Supports auditing, historical tracking, and forecasting.
+
+ 4. product_bundles self-referencing	
+ Ex:- Allows nesting of products (e.g., kits, multi-packs)
+
+ 5. Indexes on sku, product_id, warehouse_id	
+ Ex:- Improves read performance for frequent queries (alerts, lookups)
+
+ 6. Separate product_suppliers table	
+ Ex:- Supports many-to-many relation and avoids data duplication
+
+ 7. low_stock_threshold in products	
+ Ex:- Enables dynamic alerts, customizable per product
+
+ 
+ 8. Foreign Keys with ON DELETE CASCADE/SET NULL (optional) 
+ Ex:- Helps maintain referential integrity if designed carefully
