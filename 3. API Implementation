@@ -1,0 +1,109 @@
+1. Flask API Implementation:-
+
+from flask import Flask, jsonify
+from datetime import datetime, timedelta
+from models import db, Product, Warehouse, Inventory, Supplier, Sale, ProductSupplier  # ORM models
+
+app = Flask(__name__)
+
+@app.route('/api/companies/<int:company_id>/alerts/low-stock', methods=['GET'])
+def low_stock_alerts(company_id):
+    # Define time window for "recent sales" (Assumption: last 30 days)
+    recent_sales_window = datetime.utcnow() - timedelta(days=30)
+
+    try:
+        # Step 1: Find products with recent sales in the last 30 days
+        recent_product_ids = db.session.query(Sale.product_id).join(Warehouse).filter(
+            Warehouse.company_id == company_id,
+            Sale.created_at >= recent_sales_window
+        ).distinct().subquery()
+
+        # Step 2: Get inventory levels for those products across warehouses
+        results = db.session.query(
+            Product.id.label("product_id"),
+            Product.name.label("product_name"),
+            Product.sku,
+            Product.low_stock_threshold.label("threshold"),
+            Warehouse.id.label("warehouse_id"),
+            Warehouse.name.label("warehouse_name"),
+            Inventory.quantity.label("current_stock"),
+            Supplier.id.label("supplier_id"),
+            Supplier.name.label("supplier_name"),
+            Supplier.contact_email
+        ).join(Inventory, Product.id == Inventory.product_id) \
+         .join(Warehouse, Inventory.warehouse_id == Warehouse.id) \
+         .join(ProductSupplier, Product.id == ProductSupplier.product_id) \
+         .join(Supplier, ProductSupplier.supplier_id == Supplier.id) \
+         .filter(
+            Warehouse.company_id == company_id,
+            Product.id.in_(recent_product_ids),
+            Inventory.quantity < Product.low_stock_threshold
+         ).all()
+
+        # Step 3: Build alert objects
+        alerts = []
+        for row in results:
+            # Simple estimation (assumption): 1 unit sold per day if active, avoid divide-by-zero
+            days_until_stockout = (
+                int(row.current_stock / 1) if row.current_stock > 0 else 0
+            )
+
+            alerts.append({
+                "product_id": row.product_id,
+                "product_name": row.product_name,
+                "sku": row.sku,
+                "warehouse_id": row.warehouse_id,
+                "warehouse_name": row.warehouse_name,
+                "current_stock": row.current_stock,
+                "threshold": row.threshold,
+                "days_until_stockout": days_until_stockout,
+                "supplier": {
+                    "id": row.supplier_id,
+                    "name": row.supplier_name,
+                    "contact_email": row.contact_email
+                }
+            })
+
+        return jsonify({
+            "alerts": alerts,
+            "total_alerts": len(alerts)
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+2. Edge Cases Handled:-
+
+1. No sales in last 30 days
+:- Uses filter on recent sales subquery; no false alerts.
+
+2 Multiple suppliers per product
+:- Currently returns one; can be extended to support multiple.
+
+3 Zero stock	
+:- days_until_stockout becomes 0.
+
+4 Missing supplier info
+:- Assumes supplier is required; if optional, add LEFT JOIN.
+
+5 Incorrect or missing company ID
+:- No results returned; doesn't crash
+
+6 Threshold = NULL
+:- Should be handled at DB level with default value or nullable check.
+
+7. Divide-by-zero	
+Avoided by checking stock before division.
+
+
+3.​ Explain Approach:
+1. Filter recent sales by joining sales and warehouses with a date filter.
+
+2. Join related tables (products, warehouses, inventory, suppliers) using SQLAlchemy queries.
+
+3. Compare stock vs. threshold for each product-warehouse pair.
+
+4. Estimate days until stockout (basic logic: assume 1 unit sold per day).
+
+5. Return structured JSON including product, stock, and supplier info.
